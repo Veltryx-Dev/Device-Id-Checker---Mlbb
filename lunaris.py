@@ -659,7 +659,7 @@ if __name__ == "__main__":
                 import concurrent.futures
                 input_data = json.load(sys.stdin)
                 dids = input_data.get("device_ids", [])
-                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
                     results = list(executor.map(check_device_id, dids))
                 print(json.dumps({"success": True, "results": results}))
             except Exception as ex:

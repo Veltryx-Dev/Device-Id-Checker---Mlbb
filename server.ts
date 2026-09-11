@@ -91,7 +91,7 @@ app.post("/api/check-stream", async (req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    const chunkSize = 50;
+    const chunkSize = 150;
     const total = device_ids.length;
     let processed = 0;
 
@@ -136,6 +136,37 @@ app.post("/api/check-stream", async (req, res) => {
 });
 
 
+
+// Telegram notification endpoint
+app.post("/api/telegram-notify", async (req, res) => {
+  try {
+    const { bot_token, chat_id, message } = req.body;
+    if (!bot_token || !chat_id || !message) {
+      return res.status(400).json({ success: false, error: "bot_token, chat_id, and message required" });
+    }
+
+    const tgUrl = `https://api.telegram.org/bot${bot_token}/sendMessage`;
+    const response = await fetch(tgUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chat_id,
+        text: message,
+        parse_mode: "HTML",
+      }),
+    });
+
+    const data = await response.json();
+    if (data.ok) {
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ success: false, error: data.description || "Telegram API error" });
+    }
+  } catch (err: any) {
+    console.error("Telegram notify error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

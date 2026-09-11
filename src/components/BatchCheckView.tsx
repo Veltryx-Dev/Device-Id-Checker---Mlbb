@@ -1,10 +1,16 @@
 import React, { useState, useRef } from "react";
 import { CheckResult, PlayerData } from "../types";
-import { Terminal, Play, Download, Search, CheckCircle2, AlertTriangle, ChevronRight, Trash2, Upload, BarChart3, Users, ShieldAlert, Zap, Activity, User, Sparkles } from "lucide-react";
+import { Terminal, Play, Download, Search, CheckCircle2, AlertTriangle, ChevronRight, Trash2, Upload, BarChart3, Users, ShieldAlert, Zap, Activity, User, Sparkles, Send } from "lucide-react";
 import { PlayerDetailModal } from "./PlayerDetailModal";
 
 export const BatchCheckView: React.FC = () => {
   const [mode, setMode] = useState<"single" | "bulk">("single");
+
+  // Telegram Configuration State
+  const [telegramBot, setTelegramBot] = useState("");
+  const [telegramChatId, setTelegramChatId] = useState("");
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [telegramTesting, setTelegramTesting] = useState(false);
 
   // Single Mode State
   const [singleId, setSingleId] = useState("");
@@ -20,6 +26,53 @@ export const BatchCheckView: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedPlayer, setSelectedPlayer] = useState<{ deviceId: string; player: PlayerData } | null>(null);
+
+  const sendTelegramAlert = async (text: string) => {
+    if (!telegramBot || !telegramChatId) return;
+    try {
+      await fetch("/api/telegram-notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bot_token: telegramBot.trim(),
+          chat_id: telegramChatId.trim(),
+          message: text,
+        }),
+      });
+    } catch (err) {
+      console.error("Telegram send error:", err);
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    if (!telegramBot.trim() || !telegramChatId.trim()) {
+      alert("Please enter both Telegram bot token and user ID.");
+      return;
+    }
+    setTelegramTesting(true);
+    try {
+      const res = await fetch("/api/telegram-notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bot_token: telegramBot.trim(),
+          chat_id: telegramChatId.trim(),
+          message: "🟢 <b>Lunaris Dev Id Checker</b> Telegram Connected Successfully!",
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("Telegram test message sent successfully!");
+        setTelegramEnabled(true);
+      } else {
+        alert(`Failed to send test message: ${data.error}`);
+      }
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setTelegramTesting(false);
+    }
+  };
 
   // Handle Single Check
   const handleSingleCheck = async () => {
@@ -40,7 +93,18 @@ export const BatchCheckView: React.FC = () => {
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.results) && data.results.length > 0) {
-        setSingleResult(data.results[0]);
+        const resItem = data.results[0];
+        setSingleResult(resItem);
+
+        if (telegramEnabled && telegramBot && telegramChatId && resItem.status === "registered" && resItem.player_data) {
+          const msg = `🎮 <b>Lunaris Active Hit Found (Single Mode)!</b>\n\n` +
+                      `👤 <b>Nickname:</b> ${resItem.player_data.nickname}\n` +
+                      `🆔 <b>Player ID:</b> ${resItem.player_data.player_id}\n` +
+                      `🏆 <b>Rank:</b> ${resItem.player_data.current_rank}\n` +
+                      `⚔️ <b>Win Rate:</b> ${resItem.player_data.win_rate}\n` +
+                      `📱 <b>Device ID:</b> <code>${resItem.device_id}</code>`;
+          sendTelegramAlert(msg);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -119,6 +183,20 @@ export const BatchCheckView: React.FC = () => {
                 if (data.progress) {
                   setProgress(data.progress);
                 }
+
+                if (telegramEnabled && telegramBot && telegramChatId) {
+                  for (const r of data.results) {
+                    if (r.status === "registered" && r.player_data) {
+                      const msg = `🎮 <b>Lunaris Active Hit Found!</b>\n\n` +
+                                  `👤 <b>Nickname:</b> ${r.player_data.nickname}\n` +
+                                  `🆔 <b>Player ID:</b> ${r.player_data.player_id}\n` +
+                                  `🏆 <b>Rank:</b> ${r.player_data.current_rank}\n` +
+                                  `⚔️ <b>Win Rate:</b> ${r.player_data.win_rate}\n` +
+                                  `📱 <b>Device ID:</b> <code>${r.device_id}</code>`;
+                      sendTelegramAlert(msg);
+                    }
+                  }
+                }
               }
             } catch (e) {
               console.error("JSON parse error on stream chunk:", e);
@@ -196,8 +274,9 @@ export const BatchCheckView: React.FC = () => {
   });
 
   const registeredCount = results.filter((r) => r.status === "registered").length;
-  const invalidCount = results.filter((r) => r.status === "invalid").length;
   const unregisteredCount = results.filter((r) => r.status === "unregistered").length;
+  const invalidCount = results.filter((r) => r.status === "invalid").length;
+  const errorCount = results.filter((r) => r.status === "error" || (r.error && r.status !== "invalid")).length;
   const hitRate = results.length > 0 ? ((registeredCount / results.length) * 100).toFixed(1) : "0.0";
   const bannedCount = results.filter((r) => r.player_data?.ban_status && r.player_data.ban_status !== "Not Banned").length;
   const percentComplete = progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0;
@@ -228,7 +307,7 @@ export const BatchCheckView: React.FC = () => {
             }`}
           >
             <User className="w-4 h-4" />
-            <span>Single Mode</span>
+            <span>Single</span>
           </button>
 
           <button
@@ -240,8 +319,63 @@ export const BatchCheckView: React.FC = () => {
             }`}
           >
             <Terminal className="w-4 h-4" />
-            <span>Bulk Mode</span>
+            <span>Bulk</span>
           </button>
+        </div>
+      </div>
+
+      {/* Telegram Notification Configuration Card */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-slate-900 dark:text-white font-bold text-sm">
+            <Send className="w-4 h-4 text-sky-500" />
+            <span>Receive Results on Telegram on Registered</span>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={telegramEnabled}
+              onChange={(e) => setTelegramEnabled(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-indigo-600"></div>
+            <span className="ml-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+              {telegramEnabled ? "Enabled" : "Disabled"}
+            </span>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">enter telegram bot:</label>
+            <input
+              type="text"
+              value={telegramBot}
+              onChange={(e) => setTelegramBot(e.target.value)}
+              placeholder="e.g. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+              className="w-full font-mono text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">enter your user id:</label>
+            <div className="flex space-x-2">
+              <input
+                type="text"
+                value={telegramChatId}
+                onChange={(e) => setTelegramChatId(e.target.value)}
+                placeholder="e.g. 987654321"
+                className="flex-1 font-mono text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <button
+                onClick={handleTestTelegram}
+                disabled={telegramTesting}
+                className="px-4 py-2.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow transition disabled:opacity-50"
+              >
+                {telegramTesting ? "Testing..." : "Test Bot"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -265,7 +399,7 @@ export const BatchCheckView: React.FC = () => {
                 type="text"
                 value={singleId}
                 onChange={(e) => setSingleId(e.target.value)}
-                placeholder="Enter device ID (e.g. and_e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855...)"
+                placeholder="Enter device ID (e.g. and_e3b0c44298fc1c14...)"
                 className="flex-1 font-mono text-sm px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
               />
               <button
@@ -412,7 +546,7 @@ export const BatchCheckView: React.FC = () => {
           </div>
 
           {/* Live Statistics Dashboard */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center space-x-4">
               <div className="p-3 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
                 <Users className="w-6 h-6" />
@@ -429,17 +563,17 @@ export const BatchCheckView: React.FC = () => {
               </div>
               <div>
                 <div className="text-2xl font-bold text-slate-900 dark:text-white">{registeredCount} <span className="text-xs font-normal text-emerald-600">({hitRate}%)</span></div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">Active Hits</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">Registered</div>
               </div>
             </div>
 
             <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center space-x-4">
-              <div className="p-3 rounded-xl bg-rose-500/10 text-rose-500">
-                <ShieldAlert className="w-6 h-6" />
+              <div className="p-3 rounded-xl bg-amber-500/10 text-amber-500">
+                <AlertTriangle className="w-6 h-6" />
               </div>
               <div>
-                <div className="text-2xl font-bold text-slate-900 dark:text-white">{bannedCount}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">Banned / Restricted</div>
+                <div className="text-2xl font-bold text-slate-900 dark:text-white">{unregisteredCount}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">Unregistered</div>
               </div>
             </div>
 
@@ -449,7 +583,17 @@ export const BatchCheckView: React.FC = () => {
               </div>
               <div>
                 <div className="text-2xl font-bold text-slate-900 dark:text-white">{invalidCount}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">Invalid Formats</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">Invalid</div>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center space-x-4">
+              <div className="p-3 rounded-xl bg-rose-500/10 text-rose-500">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-slate-900 dark:text-white">{errorCount}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">Error</div>
               </div>
             </div>
           </div>
