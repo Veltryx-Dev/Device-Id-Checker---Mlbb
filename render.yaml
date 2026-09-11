@@ -2,7 +2,7 @@ services:
   - type: web
     name: lunaris-dev-id-checker
     env: node
-    buildCommand: npm install && npm run build
+    buildCommand: apt-get update && apt-get install -y python3 python3-pip && pip3 install pycryptodome zstandard requests && npm install && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
